@@ -1,3 +1,4 @@
+.gitignore
 Changes
 inc/Module/Install.pm
 inc/Module/Install/Authority.pm
@@ -10,10 +11,12 @@ inc/Module/Install/Makefile.pm
 inc/Module/Install/Metadata.pm
 inc/Module/Install/Win32.pm
 inc/Module/Install/WriteAll.pm
+lib/Collectd/Plugin/Read/Message/Passing.pm
 lib/Collectd/Plugin/Write/Message/Passing.pm
 lib/Message/Passing/Collectd.pm
 Makefile.PL
 MANIFEST			This list of files
+MANIFEST.SKIP
 META.yml
 README
 t/00_compile.t

@@ -84,12 +84,24 @@ sub init {
     return 1;
 }
 
+my %_TYPE_LOOKUP = (
+    0 => 'COUNTER',
+    1 => 'GAUGE',
+);
 sub write {
-    my ($name, $val) = @_;
+    my ($name, $types, $data) = @_;
     # ["load",[{"min":0,"max":100,"name":"shortterm","type":1},{"min":0,"max":100,"name":"midterm","type":1},{"min":0,"max":100,"name":"longterm","type":1}],{"plugin":"load","time":1341655869.22588,"type":"load","values":[0.41,0.13,0.08],"interval":10,"host":"ldn-dev-tdoran.youdevise.com"}]
     # "transport.tx.size",[{"min":0,"max":0,"name":"transport.tx.size","type":0}],{"plugin":"ElasticSearch","time":1341655799.77979,"type":"transport.tx.size","values":[9725948078],"interval":10,"host":"ldn-dev-tdoran.youdevise.com"}
+    my @values;
+    foreach my $val (@{ $data->{values} }) {
+        my $meta = shift(@$types);
+        $meta->{value} = $val;
+        push(@values, $meta);
+        $meta->{type} = $_TYPE_LOOKUP{$meta->{type}} || $meta->{type};
+    }
+    $data->{values} = \@values;
     my $output = _output() || return 0;
-    $output->consume($val);
+    $output->consume($data);
     return 1;
 }
 
@@ -133,7 +145,52 @@ Collectd::Plugin::Write::Message::Passing - Write collectd metrics via Message::
 
     Will emit metrics like this:
 
-    [{"min":0,"max":100,"name":"shortterm","type":1},{"min":0,"max":100,"name":"midterm","type":1},{"min":0,"max":100,"name":"longterm","type":1}],{"plugin":"load","time":1341655869.22588,"type":"load","values":[0.41,0.13,0.08],"interval":10,"host":"t0m.local"}]
+    {
+        "plugin":"ElasticSearch",
+        "time":1341656031.18621,
+        "values":[
+            {
+                "value":0,
+                "min":0,
+                "name":"indices.get.time",
+                "max":0,
+                "type":0
+            }
+        ],
+        "type":"indices.get.time",
+        "interval":10,
+        "host":"t0m.local"
+    }
+
+    or, for multi-value metrics:
+
+    {
+        "plugin":"load",
+        "time":1341655869.22588,
+        "type":"load",
+        "values":[
+            {
+                "value":0.41,
+                "min":0,"max":100,"name":"shortterm","type":1
+            },
+            {
+                "value":0.13,
+                "min":0,
+                "max":100,
+                "name": "midterm",
+                "type":1
+            },
+            {
+                "value":0.08
+                "min":0,
+                "max":100,
+                "name":"longterm",
+                "type":1
+            }
+        ],
+        "interval":10,
+        "host":"t0m.local"
+    }
 
 =head1 DESCRIPTION
 
@@ -157,7 +214,7 @@ The hash of options for the output class. Not required, but almost certainly nee
 =head3 EncoderClass
 
 The name of the class which will act  the Message::Passing encoder. Will be used as-is if prefixed with C<+>,
-otherwise C<Message::Passing::Output::> will be prepended. Optional, defaults to L<JSON|Message::Passing::Filter::Encoder::JSON>.
+otherwise C<Message::Passing::Filter::Encoder::> will be prepended. Optional, defaults to L<JSON|Message::Passing::Filter::Encoder::JSON>.
 
 =head3 EncoderOptions
 
@@ -177,6 +234,11 @@ Validates the config, and initializes the C<$OUTPUT>
 =head2 write
 
 Writes a metric to the output in C<$OUTPUT>.
+
+=head1 BUGS
+
+Never enters the L<AnyEvent> event loop, and therefore may only work reliably with
+(and is only tested with) L<Message::Passing::Output::ZeroMQ>.
 
 =head1 AUTHOR, COPYRIGHT & LICENSE
 
