@@ -29,5 +29,6 @@ requires:
   namespace::clean: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.004
+  repository: git://github.com/suretec/Message-Passing-Collectd.git
+version: 0.005
 x_authority: GHENRY
