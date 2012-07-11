@@ -8,6 +8,11 @@ use String::RewritePrefix ();
 use Try::Tiny;
 use Message::Passing::Output::Callback;
 use AnyEvent;
+BEGIN {
+    *tid = eval {
+        require threads;
+    } ? sub { threads->tid } : sub { 0 };
+}
 use namespace::clean;
 
 our $INPUT;
@@ -39,25 +44,31 @@ sub config {
     }
 }
 
+my %_TYPE_LOOKUP = (
+    'COUNTER' => 0,
+    'GAUGE' => 1,
+);
+
 sub _do_message_passing_read {
     my $message = shift;
     Collectd::plugin_log(Collectd::LOG_WARNING, "Got message from Message::Passing " . JSON::encode_json($message));
+    my $vl = {
+        values => [ map { $_->{value} } @{$message->{values}} ],
+        plugin => $message->{plugin},
+        type => $_TYPE_LOOKUP{$message->{values}->[0]->{type}},
+    };
+    $vl = {
+        values => [ map { $_->{value} } @{$message->{values}} ],
+        plugin => $message->{plugin},
+        type => $message->{type},
+        $message->{plugin_instance} ? (plugin_instance => $message->{plugin_instance}) : (),
+    };
+    Collectd::plugin_log(Collectd::LOG_WARNING, "Got message for collectd " . JSON::encode_json($vl));
+    Collectd::plugin_dispatch_values($vl);
 }
 
 # ["load",[{"min":0,"max":100,"name":"shortterm","type":1},{"min":0,"max":100,"name":"midterm","type":1},{"min":0,"max":100,"name":"longterm","type":1}],{"plugin":"load","time":1341655869.22588,"type":"load","values":[0.41,0.13,0.08],"interval":10,"host":"ldn-dev-tdoran.youdevise.com"}]
 # "transport.tx.size",[{"min":0,"max":0,"name":"transport.tx.size","type":0}],{"plugin":"ElasticSearch","time":1341655799.77979,"type":"transport.tx.size","values":[9725948078],"interval":10,"host":"ldn-dev-tdoran.youdevise.com"}
-#    my @values;
-#    foreach my $val (@{ $data->{values} }) {
-#        my $meta = shift(@$types);
-#        $meta->{value} = $val;
-#        push(@values, $meta);
-#        $meta->{type} = $_TYPE_LOOKUP{$meta->{type}} || $meta->{type};
-#    }
-#    $data->{values} = \@values;
-#    my $output = _input() || return 0;
-#    $output->consume($data);
-#}
-
 sub _input {
     if (!$INPUT) {
         try {
@@ -74,16 +85,16 @@ sub _input {
             );
         }
         catch {
-            Collectd::plugin_log(Collectd::LOG_WARNING, "Got exception building inputs: $_ - DISABLING");
+            Collectd::plugin_log(Collectd::LOG_WARNING, "Got exception building inputs: $_ - DISABLING thread id " . tid());
             undef $INPUT;
-        }
+        };
     }
     return $INPUT;
 }
 
 sub init {
     if (!$CONFIG{inputclass}) {
-        Collectd::plugin_log(Collectd::LOG_WARNING, "No inputclass config for Message::Passing plugin - disabling");
+        Collectd::plugin_log(Collectd::LOG_WARNING, "No inputclass config for Message::Passing plugin - disabling PID $$ TID " . tid());
         return 0;
     }
     $CONFIG{inputclass} = String::RewritePrefix->rewrite(
@@ -100,22 +111,17 @@ sub init {
         $CONFIG{decoderclass}
     );
     if (!eval { require_module($CONFIG{decoderclass}) }) {
-        Collectd::plugin_log(Collectd::LOG_WARNING, "Could not load decoderclass=" . $CONFIG{DecoderClass} . " error: $@");
+        Collectd::plugin_log(Collectd::LOG_WARNING, "Could not load decoderclass=" . $CONFIG{decoderclass} . " error: $@");
         return 0;
     }
     $CONFIG{inputoptions} ||= {};
     $CONFIG{decoderoptions} ||= {};
     $CONFIG{readtimeslice} = 0.25;
-    _input() || return 0;
     return 1;
 }
 
-my %_TYPE_LOOKUP = (
-    'COUNTER' => 0,
-    'GAUGE' => 1,
-);
-
 sub read {
+    _input();
     my $cv = AnyEvent->condvar;
     my $t = AnyEvent->timer(
         after => $CONFIG{readtimeslice},
@@ -128,23 +134,28 @@ sub read {
 }
 
 Collectd::plugin_register(
-    Collectd::TYPE_INIT, 'Read::Message::Passing', 'Collectd::Plugin::Write::Message::Passing::init'
+    Collectd::TYPE_INIT, 'Read::Message::Passing', 'Collectd::Plugin::Read::Message::Passing::init'
 );
 Collectd::plugin_register(
-    Collectd::TYPE_CONFIG, 'Read::Message::Passing', 'Collectd::Plugin::Write::Message::Passing::config'
+    Collectd::TYPE_CONFIG, 'Read::Message::Passing', 'Collectd::Plugin::Read::Message::Passing::config'
 );
 Collectd::plugin_register(
-    Collectd::TYPE_READ, 'Read::Message::Passing', 'Collectd::Plugin::Write::Message::Passing::read'
+    Collectd::TYPE_READ, 'Read::Message::Passing', 'Collectd::Plugin::Read::Message::Passing::read'
 );
 
 1;
 
 =head1 NAME
 
-Collectd::Plugin::Read::Message::Passing - Write collectd metrics via Message::Passing
+Collectd::Plugin::Read::Message::Passing - Read collectd metrics via Message::Passing
 
 =head1 SYNOPSIS
 
+    # Only tested with 1 read thread!
+    ReadThreads   1
+    # You MUST setup types.db for all types you emit!
+    TypesDB       "/usr/share/collectd/types.db"
+    TypesDB       "/usr/local/share/collectd/types_local.db"
     <LoadPlugin perl>
         Globals true
     </LoadPlugin>
@@ -154,9 +165,9 @@ Collectd::Plugin::Read::Message::Passing - Write collectd metrics via Message::P
         <Plugin "Read::Message::Passing">
             # MANDATORY - You MUST configure an output class
             inputclass "ZeroMQ"
-            <OutputOptions>
-                connect "tcp://192.168.0.1:5552"
-            </OutputOptions>
+            <inputoptions>
+                socket_bind "tcp://192.168.0.1:5552"
+            </inputoptions>
             # OPTIONAL - Defaults to JSON
             #decoderclass "JSON"
             #<decoderoptions>
@@ -217,7 +228,9 @@ Collectd::Plugin::Read::Message::Passing - Write collectd metrics via Message::P
 
 A collectd plugin to consume metrics from L<Message::Passing> into L<collectd|http://collectd.org/>.
 
-B<WARNING:> This plugin is pre-alpha, and collectd causes blocking - may only work with ZeroMQ, or not at all.
+B<WARNING:> This plugin is pre-alpha, and is only tested with 1 collectd thread and the ZeroMQ Input.
+
+B<NOTE:> You B<MUST> have registered any types you ingest in a C<types.db> for collectd. Failure to do this can result in segfaults!
 
 =head1 PACKAGE VARIABLES
 

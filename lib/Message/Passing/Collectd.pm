@@ -2,7 +2,7 @@ package Message::Passing::Collectd;
 use strict;
 use warnings;
 
-our $VERSION = '0.005';
+our $VERSION = '0.006';
 
 1;
 
@@ -14,8 +14,14 @@ Message::Passing::Collectd - a suite of adaptors between Message::Passing and co
 
 This package is a placeholder for adaptors between L<Message::Passing> and L<collectd|http://collectd.org>.
 
-Please see L<Collectd::Plugin::Write::Message::Passing> (known working) and
-L<Collectd::Plugin::Read::Message::Passing> (sketch currently).
+Please see L<Collectd::Plugin::Write::Message::Passing> for emitting
+metrics data and
+L<Collectd::Plugin::Read::Message::Passing> for reading metrics data
+
+=head1 NOTE
+
+The adaptors in this plugin are currently experimental, and have only
+been tested with the L<ZeroMQ|Message::Passing::ZeroMQ> transport.
 
 =head1 AUTHOR
 
